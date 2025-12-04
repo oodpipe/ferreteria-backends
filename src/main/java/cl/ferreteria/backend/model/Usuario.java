@@ -3,13 +3,30 @@ package cl.ferreteria.backend.model;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Collection;
+import java.util.List;
 
+@Data
+/**
+ * @return
+ */
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
-@Table(name = "usuarios")
-public class Usuario {
+@Table(name = "usuarios", uniqueConstraints = {
+    @UniqueConstraint(columnNames = "email")
+})
+public class Usuario implements UserDetails {
+    
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -17,6 +34,9 @@ public class Usuario {
     @NotBlank(message = "El nombre es obligatorio")
     @Column(nullable = false)
     private String nombre;
+
+    private String apellido;
+    private String run;
 
     @NotBlank(message = "El email es obligatorio")
     @Email(message = "El email debe ser válido")
@@ -27,39 +47,48 @@ public class Usuario {
     @Column(nullable = false)
     private String password;
 
-    // Cambio: Set de Strings en lugar de enum Rol
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "usuario_roles", joinColumns = @JoinColumn(name = "usuario_id"))
-    @Column(name = "rol")
-    private Set<String> roles = new HashSet<>();
-
-    // Constructores
-    public Usuario() {}
-
-    public Usuario(String nombre, String email, String password) {
-        this.nombre = nombre;
-        this.email = email;
-        this.password = password;
+    public enum Rol {
+        ADMIN,
+        USER,
+        VENDEDOR
     }
 
-    // Getters y Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Rol rol;
 
-    public String getNombre() { return nombre; }
-    public void setNombre(String nombre) { this.nombre = nombre; }
+    private String region;
+    private String comuna;
+    private String direccion;
 
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
+    // ========== SPRING SECURITY ==========
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return List.of(new SimpleGrantedAuthority("ROLE_" + rol.name()));
+    }
 
-    public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
+    @Override
+    public String getUsername() {
+        return this.email;
+    }
 
-    public Set<String> getRoles() { return roles; }
-    public void setRoles(Set<String> roles) { this.roles = roles; }
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
 
-    // Método útil para agregar roles
-    public void agregarRol(String rol) {
-        this.roles.add(rol);
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
     }
 }

@@ -1,94 +1,93 @@
 package cl.ferreteria.backend.controller;
 
+import cl.ferreteria.backend.dto.AuthResponse;
+import cl.ferreteria.backend.dto.LoginRequest;
+import cl.ferreteria.backend.dto.RegisterRequest;
 import cl.ferreteria.backend.model.Usuario;
-import cl.ferreteria.backend.security.JwtUtil;
-import cl.ferreteria.backend.service.UserService;
-import org.springframework.beans.factory.annotation.Autowired;
+import cl.ferreteria.backend.repository.UsuarioRepository;
+import cl.ferreteria.backend.security.JwtService;
+import cl.ferreteria.backend.service.UsuarioService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.stream.Collectors;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 @CrossOrigin(origins = "http://localhost:3000")
 public class AuthController {
 
-    @Autowired
-    private UserService userService;
-
-    @Autowired
-    private JwtUtil jwtUtil;
+    private final AuthenticationManager authenticationManager;
+    private final UsuarioService usuarioService;
+    private final JwtService jwtService;
+    private final UsuarioRepository usuarioRepository;
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
+    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
         try {
-            // Validar credenciales
-            if (userService.validarCredenciales(loginRequest.getEmail(), loginRequest.getPassword())) {
-                Usuario usuario = userService.buscarPorEmail(loginRequest.getEmail()).get();
-                
-                // Generar token JWT
-                String token = jwtUtil.generateToken(
-                    usuario.getEmail(),
-                    usuario.getRoles().stream().collect(Collectors.toList())
-                );
-                
-                // Respuesta con token y datos del usuario
-                Map<String, Object> response = new HashMap<>();
-                response.put("token", token);
-                response.put("usuario", Map.of(
-                    "id", usuario.getId(),
-                    "nombre", usuario.getNombre(),
-                    "email", usuario.getEmail(),
-                    "roles", usuario.getRoles()
-                ));
-                
-                return ResponseEntity.ok(response);
-            } else {
-                return ResponseEntity.status(401).body("Credenciales inválidas");
-            }
+            // Autenticar con Spring Security
+            Authentication authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
+            );
+
+            // Obtener usuario de la BD
+            Usuario usuario = usuarioRepository.findByEmail(request.getEmail())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuario no encontrado"));
+
+            // Generar token
+            String token = jwtService.generateToken(usuario);
+
+            return ResponseEntity.ok(AuthResponse.builder()
+                    .token(token)
+                    .usuario(usuario)
+                    .build());
+
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error en el login: " + e.getMessage());
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Credenciales inválidas");
         }
     }
 
     @PostMapping("/registro")
-    public ResponseEntity<?> registrarUsuario(@RequestBody Usuario usuario) {
+    public ResponseEntity<AuthResponse> registrarUsuario(@RequestBody RegisterRequest request) {
         try {
-            Usuario usuarioRegistrado = userService.registrarUsuario(usuario);
+            // Verificar si el email ya existe
+            if (usuarioRepository.existsByEmail(request.getEmail())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El email ya está registrado");
+            }
+
+            // Convertir DTO a entidad
+            Usuario usuario = Usuario.builder()
+                    .nombre(request.getNombre())
+                    .apellido(request.getApellido())
+                    .email(request.getEmail())
+                    .password(request.getPassword()) // Se encriptará en el servicio
+                    .run(request.getRun())
+                    .region(request.getRegion())
+                    .comuna(request.getComuna())
+                    .direccion(request.getDireccion())
+                    .rol(Usuario.Rol.USER) // Por defecto USER
+                    .build();
+
+            // Registrar usuario
+            Usuario usuarioRegistrado = usuarioService.registrarUsuario(usuario);
             
-            // Generar token automáticamente después del registro
-            String token = jwtUtil.generateToken(
-                usuarioRegistrado.getEmail(),
-                usuarioRegistrado.getRoles().stream().collect(Collectors.toList())
-            );
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("token", token);
-            response.put("usuario", Map.of(
-                "id", usuarioRegistrado.getId(),
-                "nombre", usuarioRegistrado.getNombre(),
-                "email", usuarioRegistrado.getEmail(),
-                "roles", usuarioRegistrado.getRoles()
-            ));
-            
-            return ResponseEntity.ok(response);
+            // Generar token automáticamente
+            String token = jwtService.generateToken(usuarioRegistrado);
+
+            return ResponseEntity.status(HttpStatus.CREATED).body(AuthResponse.builder()
+                    .token(token)
+                    .usuario(usuarioRegistrado)
+                    .build());
+
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error en el registro: " + e.getMessage());
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Error en el registro: " + e.getMessage());
         }
-    }
-
-    // Clase interna para el request de login
-    public static class LoginRequest {
-        private String email;
-        private String password;
-
-        // Getters y Setters
-        public String getEmail() { return email; }
-        public void setEmail(String email) { this.email = email; }
-        public String getPassword() { return password; }
-        public void setPassword(String password) { this.password = password; }
     }
 }
